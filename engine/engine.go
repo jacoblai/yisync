@@ -160,5 +160,7 @@ func (d *DbEngine) watch(client *mongo.Database) {
 func (d *DbEngine) Close() {
 	_ = d.Master.Client().Disconnect(context.Background())
 	_ = d.Client.Client().Disconnect(context.Background())
-	_ = ioutil.WriteFile(d.dir+"/resumeToken", d.resumeToken, 755)
+	if len(d.resumeToken) > 0 {
+		_ = ioutil.WriteFile(d.dir+"/resumeToken", d.resumeToken, 755)
+	}
 }
