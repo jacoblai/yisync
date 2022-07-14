@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/jacoblai/yisync/engine"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/signal"
@@ -30,6 +31,15 @@ func main() {
 	}
 
 	eng := engine.NewDbEngine(dir)
+
+	if _, err := os.Stat(dir + "/resumeToken"); err == nil {
+		bts, err := ioutil.ReadFile(dir + "/resumeToken")
+		if err != nil {
+			log.Println("read nil resume token")
+		} else {
+			eng.ResumeToken = bts
+		}
+	}
 
 	err = eng.Open(*masterCon, *masterDbName, *clientCon, *clientDbName)
 	if err != nil {

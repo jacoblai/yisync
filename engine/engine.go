@@ -25,7 +25,7 @@ const (
 type DbEngine struct {
 	Master      *mongo.Database //主数据库
 	Client      *mongo.Database //从数据库
-	resumeToken bson.Raw
+	ResumeToken bson.Raw
 	dir         string
 }
 
@@ -72,18 +72,14 @@ func (d *DbEngine) Open(masterMg, masterDb, clientMg, clientDb string) error {
 
 func (d *DbEngine) Sync() {
 	for {
-		d.watch(d.Master)
+		err := d.watch(d.Master)
+		if err != nil {
+			break
+		}
 	}
 }
 
-func (d *DbEngine) watch(client *mongo.Database) {
-	defer func() {
-		err := recover()
-		if err != nil {
-			log.Printf("同步出现异常: %+v \n", err)
-		}
-	}()
-
+func (d *DbEngine) watch(client *mongo.Database) error {
 	//设置过滤条件
 	pipeline := mongo.Pipeline{
 		bson.D{{"$match",
@@ -100,17 +96,17 @@ func (d *DbEngine) watch(client *mongo.Database) {
 		I: 0,
 	}
 
-	//设置监听option
-	opt := options.ChangeStream().SetFullDocument(options.UpdateLookup).SetStartAtOperationTime(timestamp)
-	if d.resumeToken != nil {
-		opt.SetResumeAfter(d.resumeToken)
+	opt := options.ChangeStream().SetFullDocument(options.UpdateLookup).SetMaxAwaitTime(60 * time.Second).SetStartAtOperationTime(timestamp)
+	if d.ResumeToken != nil {
+		opt.SetResumeAfter(d.ResumeToken)
 		opt.SetStartAtOperationTime(nil)
 	}
 
 	//获得watch监听
 	watch, err := client.Watch(context.TODO(), pipeline, opt)
 	if err != nil {
-		log.Fatal("watch监听失败：", err)
+		log.Println("watch监听失败：", err)
+		return err
 	}
 
 	//获得从库连接
@@ -121,12 +117,13 @@ func (d *DbEngine) watch(client *mongo.Database) {
 		err = watch.Decode(&stream)
 		if err != nil {
 			log.Println("watch数据失败：", err)
+			return err
 		}
 
 		log.Println("=============", stream.FullDocument["_id"])
 
 		//保存现在resumeToken
-		d.resumeToken = watch.ResumeToken()
+		d.ResumeToken = watch.ResumeToken()
 
 		switch stream.OperationType {
 		case OperationTypeInsert:
@@ -155,12 +152,13 @@ func (d *DbEngine) watch(client *mongo.Database) {
 			}
 		}
 	}
+	return nil
 }
 
 func (d *DbEngine) Close() {
 	_ = d.Master.Client().Disconnect(context.Background())
 	_ = d.Client.Client().Disconnect(context.Background())
-	if len(d.resumeToken) > 0 {
-		_ = ioutil.WriteFile(d.dir+"/resumeToken", d.resumeToken, 755)
+	if len(d.ResumeToken) > 0 {
+		_ = ioutil.WriteFile(d.dir+"/resumeToken", d.ResumeToken, 755)
 	}
 }
